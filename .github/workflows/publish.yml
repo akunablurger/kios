@@ -1,4 +1,4 @@
-name: Tidecoin Kiosk - Build & Run Emulator
+name: Tidecoin Kiosk - Build, Run, and Monitor
 
 on:
   schedule:
@@ -6,23 +6,17 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ai-studio-five-email-jobs
+  group: tidecoin-kiosk-emulator
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  visit:
-    name: email-${{ matrix.email_index }}-smoke-test
+  run-kiosk:
+    name: Build and keep Kiosk open
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    strategy:
-      fail-fast: false
-      matrix:
-        email_index: [1, 2, 3, 4, 5]
-      max-parallel: 5
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -52,19 +46,20 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew --no-daemon assembleDebug --stacktrace
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: tidecoin-kiosk-apk-${{ matrix.email_index }}
+          name: tidecoin-kiosk-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 7
 
       - name: Enable KVM
         run: |
           sudo chmod 666 /dev/kvm
           ls -l /dev/kvm
 
-      - name: Run on Emulator and capture diagnostics
+      - name: Run Kiosk in Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -79,25 +74,35 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.tidecoin.kiosk/.MainActivity
 
-            echo "Waiting for Android pinned-app confirmation"
+            echo "Tunggu dialog pinning Android"
             sleep 5
             adb shell input tap 1865 875
 
-            echo "Waiting 45 seconds for WebView to load"
+            echo "Tunggu 45 detik agar website dimuat"
             sleep 45
 
-            adb shell pidof com.tidecoin.kiosk > diagnostics/process.txt
-            adb shell screencap -p /sdcard/kiosk-${{ matrix.email_index }}.png
-            adb pull /sdcard/kiosk-${{ matrix.email_index }}.png diagnostics/kiosk-${{ matrix.email_index }}.png
-            adb logcat -d -v time > diagnostics/logcat-${{ matrix.email_index }}.txt
-            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' diagnostics/logcat-${{ matrix.email_index }}.txt > diagnostics/webview-${{ matrix.email_index }}.txt || true
-            test -s diagnostics/process.txt
+            adb shell pidof com.tidecoin.kiosk > diagnostics/process-start.txt
+            adb shell screencap -p /sdcard/kiosk-start.png
+            adb pull /sdcard/kiosk-start.png diagnostics/kiosk-start.png
+            adb logcat -d -v time > diagnostics/logcat-start.txt
 
-      - name: Upload emulator diagnostics
+            echo "Kiosk tetap berjalan sekitar 5 jam 45 menit"
+            sleep 20700
+
+            adb shell pidof com.tidecoin.kiosk > diagnostics/process-end.txt
+            adb shell screencap -p /sdcard/kiosk-end.png
+            adb pull /sdcard/kiosk-end.png diagnostics/kiosk-end.png
+            adb logcat -d -v time > diagnostics/logcat-end.txt
+
+            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' diagnostics/logcat-end.txt > diagnostics/webview-errors.txt || true
+
+            test -s diagnostics/process-end.txt
+
+      - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tidecoin-kiosk-diagnostics-${{ matrix.email_index }}
+          name: tidecoin-kiosk-diagnostics
           path: diagnostics/
           if-no-files-found: warn
           retention-days: 7
