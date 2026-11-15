@@ -2,6 +2,7 @@ package com.tidecoin.kiosk
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -13,6 +14,7 @@ import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
+    companion object { private const val TAG = "KiosWebView" }
 
     private lateinit var webView: WebView
     private val TARGET_HOST = "tidecoinweb.vercel.app"
@@ -84,7 +86,30 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                Log.i(TAG, "Page loaded: $url")
                 hideSystemUI()
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: android.webkit.WebResourceError?
+            ) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    Log.e(TAG, "Main-frame load failed: ${request.url}; code=${error?.errorCode}; description=${error?.description}")
+                }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: android.webkit.WebResourceResponse?
+            ) {
+                super.onReceivedHttpError(view, request, errorResponse)
+                if (request?.isForMainFrame == true) {
+                    Log.e(TAG, "Main-frame HTTP error: ${request.url}; status=${errorResponse?.statusCode}; reason=${errorResponse?.reasonPhrase}")
+                }
             }
         }
     }
