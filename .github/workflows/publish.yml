@@ -1,52 +1,75 @@
-name: Tidecoin Kiosk - Build & Run Emulator
+name: Tidecoin Kiosk - 5 Emulators for Nearly 6 Hours
+
 on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+
 concurrency:
-  group: ai-studio-five-email-jobs
+  group: tidecoin-kiosk-emulators
   cancel-in-progress: false
+
 permissions:
   contents: read
+
 jobs:
-  visit:
-    name: email-${{ matrix.email_index }}-smoke-test
+  run-kiosk:
+    name: Emulator ${{ matrix.device }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 360
+
     strategy:
       fail-fast: false
-      matrix:
-        email_index: [1, 2, 3, 4, 5]
       max-parallel: 5
+      matrix:
+        device: [1, 2, 3, 4, 5]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+
       - name: Generate Gradle Wrapper if missing
         run: |
           if [ ! -f ./gradlew ]; then
             gradle wrapper --gradle-version 8.9
           fi
           chmod +x ./gradlew
+
       - name: Build Debug APK
         run: ./gradlew --no-daemon assembleDebug --stacktrace
-      - name: Upload APK Artifact
+
+      - name: Upload APK for Emulator ${{ matrix.device }}
         uses: actions/upload-artifact@v4
         with:
-          name: tidecoin-kiosk-apk-${{ matrix.email_index }}
+          name: tidecoin-kiosk-apk-${{ matrix.device }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-      - name: Run on Emulator and capture diagnostics
+          retention-days: 7
+
+      - name: Enable KVM if available
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "KVM unavailable; emulator will use software acceleration."
+          fi
+
+      - name: Run Kiosk on Emulator ${{ matrix.device }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -57,25 +80,39 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 4096
           script: |
             mkdir -p diagnostics
+
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.tidecoin.kiosk/.MainActivity
-            echo "Waiting 45 seconds for WebView to load"
+
+            echo "Emulator ${{ matrix.device }}: waiting for Android pinning dialog"
+            sleep 5
+            adb shell input tap 1865 875
+
+            echo "Waiting 45 seconds for the website to load"
             sleep 45
-            adb shell pidof com.tidecoin.kiosk > diagnostics/process.txt || true
-            adb shell screencap -p /sdcard/kiosk-${{ matrix.email_index }}.png
-            adb pull /sdcard/kiosk-${{ matrix.email_index }}.png diagnostics/kiosk-${{ matrix.email_index }}.png
-            adb logcat -d -v time > diagnostics/logcat-${{ matrix.email_index }}.txt
-            if ! grep -q '[0-9]' diagnostics/process.txt; then
-              echo "App process not running after launch" | tee diagnostics/result.txt
-              exit 1
-            fi
-            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' diagnostics/logcat-${{ matrix.email_index }}.txt > diagnostics/webview-${{ matrix.email_index }}.txt || true
-            echo "App process alive after 45 seconds; screenshot and logs captured." | tee diagnostics/result.txt
-      - name: Upload emulator diagnostics
+
+            adb shell pidof com.tidecoin.kiosk > diagnostics/process-start.txt
+            adb shell screencap -p /sdcard/kiosk-start-${{ matrix.device }}.png
+            adb pull /sdcard/kiosk-start-${{ matrix.device }}.png diagnostics/kiosk-start-${{ matrix.device }}.png
+            adb logcat -d -v time > diagnostics/logcat-start-${{ matrix.device }}.txt
+
+            echo "Emulator ${{ matrix.device }}: keeping app open for about 5 hours 45 minutes"
+            sleep 20700
+
+            adb shell pidof com.tidecoin.kiosk > diagnostics/process-end.txt
+            adb shell screencap -p /sdcard/kiosk-end-${{ matrix.device }}.png
+            adb pull /sdcard/kiosk-end-${{ matrix.device }}.png diagnostics/kiosk-end-${{ matrix.device }}.png
+            adb logcat -d -v time > diagnostics/logcat-end-${{ matrix.device }}.txt
+
+            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' diagnostics/logcat-end-${{ matrix.device }}.txt > diagnostics/webview-${{ matrix.device }}.txt || true
+
+            test -s diagnostics/process-end.txt
+
+      - name: Upload diagnostics for Emulator ${{ matrix.device }}
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tidecoin-kiosk-diagnostics-${{ matrix.email_index }}
+          name: tidecoin-kiosk-diagnostics-${{ matrix.device }}
           path: diagnostics/
           if-no-files-found: warn
           retention-days: 7
