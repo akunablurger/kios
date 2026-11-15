@@ -1,4 +1,4 @@
-name: Tidecoin Kiosk - 5 Emulators for Nearly 6 Hours
+name: Tidecoin Kiosk - 5 Emulator Matrix
 
 on:
   schedule:
@@ -52,7 +52,7 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew --no-daemon assembleDebug --stacktrace
 
-      - name: Upload APK for Emulator ${{ matrix.device }}
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: tidecoin-kiosk-apk-${{ matrix.device }}
@@ -84,31 +84,32 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.tidecoin.kiosk/.MainActivity
 
-            echo "Emulator ${{ matrix.device }}: waiting for Android pinning dialog"
+            echo "Emulator ${{ matrix.device }}: wait for pinning dialog"
             sleep 5
             adb shell input tap 1865 875
 
-            echo "Waiting 45 seconds for the website to load"
+            echo "Wait 45 seconds for website to load"
             sleep 45
 
             adb shell pidof com.tidecoin.kiosk > diagnostics/process-start.txt
-            adb shell screencap -p /sdcard/kiosk-start-${{ matrix.device }}.png
-            adb pull /sdcard/kiosk-start-${{ matrix.device }}.png diagnostics/kiosk-start-${{ matrix.device }}.png
-            adb logcat -d -v time > diagnostics/logcat-start-${{ matrix.device }}.txt
+            adb shell screencap -p /sdcard/kiosk-start.png
+            adb pull /sdcard/kiosk-start.png diagnostics/kiosk-start.png
+            adb logcat -d -v time > diagnostics/logcat-start.txt
 
-            echo "Emulator ${{ matrix.device }}: keeping app open for about 5 hours 45 minutes"
+            echo "Keep app open for about 5h45m"
             sleep 20700
 
             adb shell pidof com.tidecoin.kiosk > diagnostics/process-end.txt
-            adb shell screencap -p /sdcard/kiosk-end-${{ matrix.device }}.png
-            adb pull /sdcard/kiosk-end-${{ matrix.device }}.png diagnostics/kiosk-end-${{ matrix.device }}.png
-            adb logcat -d -v time > diagnostics/logcat-end-${{ matrix.device }}.txt
+            adb shell screencap -p /sdcard/kiosk-end.png
+            adb pull /sdcard/kiosk-end.png diagnostics/kiosk-end.png
+            adb logcat -d -v time > diagnostics/logcat-end.txt
 
-            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' diagnostics/logcat-end-${{ matrix.device }}.txt > diagnostics/webview-${{ matrix.device }}.txt || true
+            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' \
+              diagnostics/logcat-end.txt > diagnostics/webview-errors.txt || true
 
             test -s diagnostics/process-end.txt
 
-      - name: Upload diagnostics for Emulator ${{ matrix.device }}
+      - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
