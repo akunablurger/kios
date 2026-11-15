@@ -90,49 +90,34 @@ jobs:
             set -eu
             mkdir -p diagnostics
 
-            # Bersihkan log boot agar hasilnya fokus pada aplikasi.
             adb logcat -c
-
-            # Pastikan Wi-Fi emulator aktif.
             adb shell svc wifi enable
             sleep 10
 
-            # Install dan jalankan aplikasi.
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -W -n com.tidecoin.kiosk/.MainActivity
 
-            # Coba konfirmasi dialog "App is pinned".
-            # Jika dialog tidak ada, tap ini hanya menyentuh area layar tersebut.
+            echo "Waiting for the Android pinning dialog"
             sleep 5
             adb shell input tap 1865 875
 
-            # Tunggu halaman WebView.
+            echo "Waiting 45 seconds for the website to load"
             sleep 45
 
-            # Simpan kondisi awal aplikasi dan log.
             adb shell pidof com.tidecoin.kiosk > diagnostics/process-start.txt
             adb shell screencap -p /sdcard/kiosk-start.png
             adb pull /sdcard/kiosk-start.png diagnostics/kiosk-start.png
             adb logcat -d -v time > diagnostics/logcat-start.txt
+            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL|ERR_' diagnostics/logcat-start.txt > diagnostics/webview-start.txt || true
 
-            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL|ERR_' \
-              diagnostics/logcat-start.txt \
-              > diagnostics/webview-start.txt || true
-
-            # Jaga aplikasi tetap terbuka hampir enam jam.
+            echo "Keeping the app open for about 5 hours and 45 minutes"
             sleep 20700
 
-            # Cek lagi bahwa proses aplikasi masih hidup.
             adb shell pidof com.tidecoin.kiosk > diagnostics/process-end.txt
-
-            # Simpan screenshot dan log akhir.
             adb shell screencap -p /sdcard/kiosk-end.png
             adb pull /sdcard/kiosk-end.png diagnostics/kiosk-end.png
             adb logcat -d -v time > diagnostics/logcat-end.txt
-
-            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL|ERR_' \
-              diagnostics/logcat-end.txt \
-              > diagnostics/webview-end.txt || true
+            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL|ERR_' diagnostics/logcat-end.txt > diagnostics/webview-end.txt || true
 
             test -s diagnostics/process-end.txt
 
