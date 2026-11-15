@@ -1,4 +1,4 @@
-name: Tidecoin Kiosk - Build, Run, and Monitor
+name: Tidecoin Kiosk - 5 Emulators for Nearly 6 Hours
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: tidecoin-kiosk-emulator
+  group: tidecoin-kiosk-emulators
   cancel-in-progress: false
 
 permissions:
@@ -14,9 +14,15 @@ permissions:
 
 jobs:
   run-kiosk:
-    name: Build and keep Kiosk open
+    name: Emulator ${{ matrix.device }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        device: [1, 2, 3, 4, 5]
 
     steps:
       - name: Checkout
@@ -46,20 +52,24 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew --no-daemon assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: Upload APK for Emulator ${{ matrix.device }}
         uses: actions/upload-artifact@v4
         with:
-          name: tidecoin-kiosk-apk
+          name: tidecoin-kiosk-apk-${{ matrix.device }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
 
-      - name: Enable KVM
+      - name: Enable KVM if available
         run: |
-          sudo chmod 666 /dev/kvm
-          ls -l /dev/kvm
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "KVM unavailable; emulator will use software acceleration."
+          fi
 
-      - name: Run Kiosk in Android Emulator
+      - name: Run Kiosk on Emulator ${{ matrix.device }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -74,35 +84,35 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.tidecoin.kiosk/.MainActivity
 
-            echo "Tunggu dialog pinning Android"
+            echo "Emulator ${{ matrix.device }}: waiting for Android pinning dialog"
             sleep 5
             adb shell input tap 1865 875
 
-            echo "Tunggu 45 detik agar website dimuat"
+            echo "Waiting 45 seconds for the website to load"
             sleep 45
 
             adb shell pidof com.tidecoin.kiosk > diagnostics/process-start.txt
-            adb shell screencap -p /sdcard/kiosk-start.png
-            adb pull /sdcard/kiosk-start.png diagnostics/kiosk-start.png
-            adb logcat -d -v time > diagnostics/logcat-start.txt
+            adb shell screencap -p /sdcard/kiosk-start-${{ matrix.device }}.png
+            adb pull /sdcard/kiosk-start-${{ matrix.device }}.png diagnostics/kiosk-start-${{ matrix.device }}.png
+            adb logcat -d -v time > diagnostics/logcat-start-${{ matrix.device }}.txt
 
-            echo "Kiosk tetap berjalan sekitar 5 jam 45 menit"
+            echo "Emulator ${{ matrix.device }}: keeping app open for about 5 hours 45 minutes"
             sleep 20700
 
             adb shell pidof com.tidecoin.kiosk > diagnostics/process-end.txt
-            adb shell screencap -p /sdcard/kiosk-end.png
-            adb pull /sdcard/kiosk-end.png diagnostics/kiosk-end.png
-            adb logcat -d -v time > diagnostics/logcat-end.txt
+            adb shell screencap -p /sdcard/kiosk-end-${{ matrix.device }}.png
+            adb pull /sdcard/kiosk-end-${{ matrix.device }}.png diagnostics/kiosk-end-${{ matrix.device }}.png
+            adb logcat -d -v time > diagnostics/logcat-end-${{ matrix.device }}.txt
 
-            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' diagnostics/logcat-end.txt > diagnostics/webview-errors.txt || true
+            grep -iE 'KiosWebView|chromium|WebView|tidecoinweb|net::|SSL' diagnostics/logcat-end-${{ matrix.device }}.txt > diagnostics/webview-${{ matrix.device }}.txt || true
 
             test -s diagnostics/process-end.txt
 
-      - name: Upload screenshots and logs
+      - name: Upload diagnostics for Emulator ${{ matrix.device }}
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tidecoin-kiosk-diagnostics
+          name: tidecoin-kiosk-diagnostics-${{ matrix.device }}
           path: diagnostics/
           if-no-files-found: warn
           retention-days: 7
