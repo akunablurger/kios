@@ -2,13 +2,11 @@ name: Tidecoin Kiosk - Build & Run Emulator (5 parallel)
 
 on:
   schedule:
-    # GitHub Actions menggunakan UTC.
-    # Berjalan setiap 6 jam.
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
 concurrency:
-  group: five-jobs
+  group: ai-studio-five-email-jobs
   cancel-in-progress: false
 
 permissions:
@@ -16,9 +14,9 @@ permissions:
 
 jobs:
   visit:
-    name: ${{ matrix.email_index }}-5-tabs
+    name: email-${{ matrix.email_index }}-5-tabs
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 390          # 6 jam + buffer
 
     strategy:
       fail-fast: false
@@ -37,7 +35,39 @@ jobs:
           java-version: "17"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Generate Gradle Wrapper (jika belum ada)
+        run: |
+          if [ ! -f ./gradlew ]; then
+            echo "gradlew tidak ditemukan → generate sekarang..."
+            gradle wrapper --gradle-version 8.9
+          else
+            echo "gradlew sudah ada"
+          fi
+          chmod +x ./gradlew
+
+      - name: Fix gradle.properties (AndroidX)
+        run: |
+          cat > gradle.properties << EOF
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.enableJetifier=true
+          kotlin.code.style=official
+          EOF
+
+      - name: Fix AndroidManifest (hilangkan ic_launcher yang tidak ada)
+        run: |
+          sed -i 's/android:icon="@mipmap\/ic_launcher"//g' app/src/main/AndroidManifest.xml
+          sed -i 's/android:roundIcon="@mipmap\/ic_launcher"//g' app/src/main/AndroidManifest.xml
+          sed -i 's/android:icon="@mipmap\/ic_launcher_round"//g' app/src/main/AndroidManifest.xml
 
       - name: Enable KVM
         run: |
@@ -46,7 +76,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Build Debug APK
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon assembleDebug --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -55,7 +85,7 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Run on Emulator (Install + Launch + Check)
+      - name: Run on Emulator (Install + Launch + Keep Alive 6 hours)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -71,14 +101,14 @@ jobs:
             echo "=== [Runner ${{ matrix.email_index }}] Launch Kiosk ==="
             adb shell am start -n com.tidecoin.kiosk/.MainActivity
 
-            echo "=== Tunggu 25 detik biar page load ==="
-            sleep 25
+            echo "=== App akan tetap hidup selama 6 jam (21600 detik) ==="
+            sleep 21600
 
-            echo "=== Cek process masih hidup ==="
+            echo "=== Cek process masih hidup setelah 6 jam ==="
             adb shell pidof com.tidecoin.kiosk || (echo "App crashed on runner ${{ matrix.email_index }}!" && exit 1)
 
-            echo "=== Ambil screenshot ==="
+            echo "=== Ambil screenshot terakhir ==="
             adb shell screencap -p /sdcard/kiosk-${{ matrix.email_index }}.png
             adb pull /sdcard/kiosk-${{ matrix.email_index }}.png || true
 
-            echo "=== Berhasil: App jalan di emulator (runner ${{ matrix.email_index }}) ==="
+            echo "=== Berhasil: App sudah jalan 6 jam di emulator (runner ${{ matrix.email_index }}) ==="
